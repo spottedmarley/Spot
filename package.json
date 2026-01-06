@@ -1,0 +1,21 @@
+{
+  "name": "spot",
+  "version": "0.1.0",
+  "description": "Local coding and system agent using Qwen2.5-coder",
+  "module": "src/index.ts",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "ollama": "^0.5.11"
+  }
+}

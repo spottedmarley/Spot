@@ -1,0 +1,68 @@
+# Dependencies
+node_modules/
+
+# Build output
+out/
+dist/
+*.tgz
+
+# Code coverage
+coverage/
+*.lcov
+
+# Logs
+logs/
+*.log
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+
+# Environment variables
+.env
+.env.development.local
+.env.test.local
+.env.production.local
+.env.local
+
+# Caches
+.eslintcache
+.cache/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# ===================
+# Spot-specific
+# ===================
+
+# Ollama models (large files, symlinked per-machine)
+models/
+model/
+
+# Session data (local, per-machine)
+sessions/
+
+# Conversation history (local)
+history/
+
+# Bundled runtime (downloaded per-machine)
+bin/
+
+# Local system info (machine-specific)
+system-info.md
+
+# Claude Code instructions (not part of Spot)
+CLAUDE.md
+
+# Project documentation (may contain local/sensitive info)
+tech_map.md
+SPOT.md
+
+# Config directory (future, may contain local settings)
+config/

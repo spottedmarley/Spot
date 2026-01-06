@@ -1,0 +1,98 @@
+#!/bin/bash
+# Spot - Local AI Agent Launcher
+# This script bootstraps the environment and launches Spot
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SPOT_MODELS="$SCRIPT_DIR/models"
+OLLAMA_MODELS="$HOME/.ollama/models"
+
+# Colors for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
+
+log_info() { echo -e "${GREEN}[Spot]${NC} $1"; }
+log_warn() { echo -e "${YELLOW}[Spot]${NC} $1"; }
+log_error() { echo -e "${RED}[Spot]${NC} $1"; }
+
+# Check if Ollama is installed
+check_ollama() {
+    if ! command -v ollama &> /dev/null; then
+        log_error "Ollama is not installed."
+        log_info "Install it with: curl -fsSL https://ollama.com/install.sh | sh"
+        exit 1
+    fi
+    log_info "Ollama found: $(which ollama)"
+}
+
+# Set up model symlink
+setup_models() {
+    # Check if models exist on the SSD
+    if [ ! -d "$SPOT_MODELS" ]; then
+        log_error "Models directory not found at $SPOT_MODELS"
+        exit 1
+    fi
+
+    # Create .ollama directory if it doesn't exist
+    mkdir -p "$HOME/.ollama"
+
+    # Check current state of models directory
+    if [ -L "$OLLAMA_MODELS" ]; then
+        # It's already a symlink - check if it points to our models
+        CURRENT_TARGET=$(readlink -f "$OLLAMA_MODELS")
+        if [ "$CURRENT_TARGET" = "$SPOT_MODELS" ]; then
+            log_info "Models already linked correctly"
+            return 0
+        else
+            log_warn "Models symlink points elsewhere: $CURRENT_TARGET"
+            log_info "Updating symlink to Spot models..."
+            rm "$OLLAMA_MODELS"
+            ln -s "$SPOT_MODELS" "$OLLAMA_MODELS"
+        fi
+    elif [ -d "$OLLAMA_MODELS" ]; then
+        # It's a real directory - back it up and create symlink
+        log_warn "Found existing models directory, backing up..."
+        mv "$OLLAMA_MODELS" "$OLLAMA_MODELS.backup.$(date +%s)"
+        ln -s "$SPOT_MODELS" "$OLLAMA_MODELS"
+        log_info "Created symlink to Spot models"
+    else
+        # Doesn't exist - create symlink
+        ln -s "$SPOT_MODELS" "$OLLAMA_MODELS"
+        log_info "Created symlink to Spot models"
+    fi
+}
+
+# Start Ollama server if not running
+start_ollama() {
+    if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+        log_info "Ollama server is running"
+    else
+        log_info "Starting Ollama server..."
+        ollama serve > /dev/null 2>&1 &
+        sleep 2
+        if curl -s http://localhost:11434/api/tags > /dev/null 2>&1; then
+            log_info "Ollama server started"
+        else
+            log_error "Failed to start Ollama server"
+            exit 1
+        fi
+    fi
+}
+
+# Main
+main() {
+    log_info "Initializing Spot..."
+
+    check_ollama
+    setup_models
+    start_ollama
+
+    log_info "Launching Spot agent..."
+    echo ""
+
+    # Run Spot using bundled Bun
+    "$SCRIPT_DIR/bin/bun" run "$SCRIPT_DIR/src/index.ts" "$@"
+}
+
+main "$@"
