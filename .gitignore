@@ -66,3 +66,6 @@ SPOT.md
 
 # Config directory (future, may contain local settings)
 config/
+
+# Test output (local experiments)
+test/
