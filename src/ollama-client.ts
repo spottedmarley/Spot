@@ -167,6 +167,14 @@ After I execute the tool, I will give you the result and you can continue.`
     return response.models.map(m => m.name);
   }
 
+  async listModelsWithInfo(): Promise<{ name: string; size: number }[]> {
+    const response = await this.client.list();
+    return response.models.map(m => ({
+      name: m.name,
+      size: m.size,
+    }));
+  }
+
   setModel(model: string): void {
     this.model = model;
   }

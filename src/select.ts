@@ -1,83 +1,127 @@
-import * as readline from 'readline';
-
 const colors = {
-  reset: '\x1b[0m',
-  bright: '\x1b[1m',
-  dim: '\x1b[2m',
-  green: '\x1b[32m',
-  cyan: '\x1b[36m',
-};
+	reset: '\x1b[0m',
+	bright: '\x1b[1m',
+	dim: '\x1b[2m',
+	green: '\x1b[32m',
+	cyan: '\x1b[36m',
+}
 
 export async function select(
-  prompt: string,
-  options: string[],
-  currentIndex?: number
+	prompt: string,
+	options: string[],
+	currentIndex?: number
 ): Promise<string | null> {
-  return new Promise((resolve) => {
-    let selectedIndex = currentIndex ?? 0;
+	return new Promise((resolve) => {
+		let selectedIndex = currentIndex ?? 0
 
-    // Enable raw mode for keypress detection
-    if (!process.stdin.isTTY) {
-      resolve(null);
-      return;
-    }
+		if (!process.stdin.isTTY) {
+			resolve(null)
+			return
+		}
 
-    readline.emitKeypressEvents(process.stdin);
-    process.stdin.setRawMode(true);
+		// Save original stdin state
+		const wasRaw = process.stdin.isRaw
 
-    const render = () => {
-      // Clear previous render
-      process.stdout.write('\x1b[?25l'); // Hide cursor
+		process.stdin.setRawMode(true)
+		process.stdin.resume()
 
-      // Move up to overwrite previous options
-      if (options.length > 0) {
-        process.stdout.write(`\x1b[${options.length}A`);
-      }
+		const render = () => {
+			process.stdout.write('\x1b[?25l') // Hide cursor
 
-      // Render options
-      options.forEach((opt, i) => {
-        const isSelected = i === selectedIndex;
-        const prefix = isSelected ? `${colors.green}❯${colors.reset}` : ' ';
-        const text = isSelected ? `${colors.bright}${opt}${colors.reset}` : `${colors.dim}${opt}${colors.reset}`;
-        process.stdout.write(`\x1b[2K${prefix} ${text}\n`);
-      });
-    };
+			// Move up to overwrite previous options
+			if (options.length > 0) {
+				process.stdout.write(`\x1b[${options.length}A`)
+			}
 
-    const cleanup = () => {
-      process.stdin.setRawMode(false);
-      process.stdin.removeListener('keypress', onKeypress);
-      process.stdout.write('\x1b[?25h'); // Show cursor
-    };
+			// Render options
+			options.forEach((opt, i) => {
+				const isSelected = i === selectedIndex
+				const prefix = isSelected ? `${colors.green}❯${colors.reset}` : ' '
+				const text = isSelected ? `${colors.bright}${opt}${colors.reset}` : `${colors.dim}${opt}${colors.reset}`
+				process.stdout.write(`\x1b[2K${prefix} ${text}\n`)
+			})
+		}
 
-    const onKeypress = (str: string | undefined, key: readline.Key) => {
-      if (key.name === 'up' || key.name === 'k') {
-        selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : options.length - 1;
-        render();
-      } else if (key.name === 'down' || key.name === 'j') {
-        selectedIndex = selectedIndex < options.length - 1 ? selectedIndex + 1 : 0;
-        render();
-      } else if (key.name === 'return') {
-        cleanup();
-        resolve(options[selectedIndex] ?? null);
-      } else if (key.name === 'escape' || (key.ctrl && key.name === 'c')) {
-        cleanup();
-        // Clear the options display
-        process.stdout.write(`\x1b[${options.length}A`);
-        options.forEach(() => process.stdout.write('\x1b[2K\n'));
-        process.stdout.write(`\x1b[${options.length}A`);
-        resolve(null);
-      }
-    };
+		const cleanup = () => {
+			process.stdin.setRawMode(wasRaw ?? false)
+			process.stdin.removeListener('data', onData)
+			process.stdout.write('\x1b[?25h') // Show cursor
+		}
 
-    // Print prompt
-    console.log(`${colors.cyan}${prompt}${colors.reset}`);
-    console.log(`${colors.dim}↑/↓ to move, Enter to select, Esc to cancel${colors.reset}`);
-    console.log();
+		let escapeBuffer = ''
 
-    // Initial render (print blank lines first)
-    options.forEach(() => console.log());
-    render();
+		const onData = (data: Buffer) => {
+			const str = data.toString()
 
-    process.stdin.on('keypress', onKeypress);
-  });
+			for (const char of str) {
+				// Handle escape sequences
+				if (escapeBuffer.length > 0 || char === '\x1b') {
+					escapeBuffer += char
+
+					// Check for complete escape sequences
+					if (escapeBuffer === '\x1b[A') {
+						// Up arrow
+						selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : options.length - 1
+						render()
+						escapeBuffer = ''
+					} else if (escapeBuffer === '\x1b[B') {
+						// Down arrow
+						selectedIndex = selectedIndex < options.length - 1 ? selectedIndex + 1 : 0
+						render()
+						escapeBuffer = ''
+					} else if (escapeBuffer === '\x1b') {
+						// Just escape, wait for more chars or timeout
+						setTimeout(() => {
+							if (escapeBuffer === '\x1b') {
+								// Standalone escape - cancel
+								cleanup()
+								process.stdout.write(`\x1b[${options.length}A`)
+								options.forEach(() => process.stdout.write('\x1b[2K\n'))
+								process.stdout.write(`\x1b[${options.length}A`)
+								resolve(null)
+								escapeBuffer = ''
+							}
+						}, 50)
+					} else if (escapeBuffer.length >= 3) {
+						// Unknown escape sequence, clear buffer
+						escapeBuffer = ''
+					}
+					continue
+				}
+
+				// Regular characters
+				if (char === '\r' || char === '\n') {
+					// Enter
+					cleanup()
+					resolve(options[selectedIndex] ?? null)
+					return
+				} else if (char === '\x03') {
+					// Ctrl+C
+					cleanup()
+					process.stdout.write(`\x1b[${options.length}A`)
+					options.forEach(() => process.stdout.write('\x1b[2K\n'))
+					process.stdout.write(`\x1b[${options.length}A`)
+					resolve(null)
+					return
+				} else if (char === 'k' || char === 'K') {
+					selectedIndex = selectedIndex > 0 ? selectedIndex - 1 : options.length - 1
+					render()
+				} else if (char === 'j' || char === 'J') {
+					selectedIndex = selectedIndex < options.length - 1 ? selectedIndex + 1 : 0
+					render()
+				}
+			}
+		}
+
+		// Print prompt
+		console.log(`${colors.cyan}${prompt}${colors.reset}`)
+		console.log(`${colors.dim}↑/↓ to move, Enter to select, Esc to cancel${colors.reset}`)
+		console.log()
+
+		// Initial render (print blank lines first)
+		options.forEach(() => console.log())
+		render()
+
+		process.stdin.on('data', onData)
+	})
 }

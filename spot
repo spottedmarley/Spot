@@ -16,14 +16,95 @@ log_info() { echo -e "${GREEN}[Spot]${NC} $1"; }
 log_warn() { echo -e "${YELLOW}[Spot]${NC} $1"; }
 log_error() { echo -e "${RED}[Spot]${NC} $1"; }
 
-# Check if Ollama is installed
+# Check if Ollama is installed, auto-install if missing
 check_ollama() {
     if ! command -v ollama &> /dev/null; then
-        log_error "Ollama is not installed."
-        log_info "Install it with: curl -fsSL https://ollama.com/install.sh | sh"
-        exit 1
+        log_warn "Ollama not installed. Installing..."
+        curl -fsSL https://ollama.com/install.sh | sh
+        if ! command -v ollama &> /dev/null; then
+            log_error "Failed to install Ollama"
+            exit 1
+        fi
+        log_info "Ollama installed successfully"
     fi
     log_info "Ollama found: $(which ollama)"
+}
+
+# Check Bun binary compatibility, download correct version if needed
+check_bun() {
+    local BUN_BIN="$SCRIPT_DIR/bin/bun"
+    local ARCH=$(uname -m)
+
+    # Test if bundled Bun works
+    if [ -x "$BUN_BIN" ] && "$BUN_BIN" --version &> /dev/null; then
+        log_info "Bun ready: $("$BUN_BIN" --version)"
+        return 0
+    fi
+
+    log_warn "Bundled Bun not compatible with this system ($ARCH)"
+    log_info "Downloading correct Bun binary..."
+
+    mkdir -p "$SCRIPT_DIR/bin"
+
+    # Download Bun for this architecture
+    case "$ARCH" in
+        x86_64)
+            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-linux-x64.zip -o /tmp/bun.zip
+            ;;
+        aarch64|arm64)
+            curl -fsSL https://github.com/oven-sh/bun/releases/latest/download/bun-linux-aarch64.zip -o /tmp/bun.zip
+            ;;
+        *)
+            log_error "Unsupported architecture: $ARCH"
+            exit 1
+            ;;
+    esac
+
+    unzip -o /tmp/bun.zip -d /tmp/bun-extract
+    mv /tmp/bun-extract/bun*/bun "$BUN_BIN"
+    chmod +x "$BUN_BIN"
+    rm -rf /tmp/bun.zip /tmp/bun-extract
+
+    if "$BUN_BIN" --version &> /dev/null; then
+        log_info "Bun installed: $("$BUN_BIN" --version)"
+    else
+        log_error "Failed to install Bun"
+        exit 1
+    fi
+}
+
+# Detect GPU capabilities
+detect_gpu() {
+    # Check for AMD GPU via sysfs or lspci
+    for card in /sys/class/drm/card*/device/vendor; do
+        if [ -f "$card" ]; then
+            vendor=$(cat "$card" 2>/dev/null)
+            if [ "$vendor" = "0x1002" ]; then
+                log_info "AMD GPU detected"
+                export SPOT_GPU="amd"
+                return 0
+            elif [ "$vendor" = "0x10de" ]; then
+                log_info "NVIDIA GPU detected"
+                export SPOT_GPU="nvidia"
+                return 0
+            fi
+        fi
+    done
+
+    # Fallback to command-line tools
+    if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+        log_info "NVIDIA GPU detected"
+        export SPOT_GPU="nvidia"
+    elif lspci 2>/dev/null | grep -qi "amd.*radeon\|amd.*display\|ati.*radeon"; then
+        log_info "AMD GPU detected"
+        export SPOT_GPU="amd"
+    elif lspci 2>/dev/null | grep -qi "nvidia"; then
+        log_info "NVIDIA GPU detected"
+        export SPOT_GPU="nvidia"
+    else
+        # No GPU found - but don't warn, Ollama will handle it
+        export SPOT_GPU="cpu"
+    fi
 }
 
 # Set up model symlink
@@ -85,6 +166,8 @@ main() {
     log_info "Initializing Spot..."
 
     check_ollama
+    check_bun
+    detect_gpu
     setup_models
     start_ollama
 

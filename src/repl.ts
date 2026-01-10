@@ -23,27 +23,23 @@ const colors = {
 const BASE_SYSTEM_PROMPT = `You are Spot, a local AI assistant for coding and Linux system tasks.
 
 ## Response Style
-Match your response length to the complexity of the request:
-- Simple question → simple answer (1-2 sentences)
-- Task request → acknowledge briefly, then do it
-- Complex question → explain what's needed, but stay focused
+- Questions and chat → respond naturally and conversationally
+- Task requests (create, build, modify, run, etc.) → acknowledge briefly, then use tools to do it
 
-Do NOT:
-- Provide examples unless asked ("Can you write JS?" → "Yes, I can." not "Yes, here's a demo...")
-- Explain capabilities hypothetically - either answer or act
-- Add disclaimers, caveats, or "let me know if you need anything else"
-- Pad responses with unnecessary context
+## When to Use Tools
+If the user asks you to DO something (create files, run commands, modify code, build something):
+- Use your tools directly - don't show code for the user to copy
+- Don't tell them what commands to run - run them yourself with bash
+- Don't show file contents - write them with write_file
 
-Do:
-- Answer directly and naturally
-- When doing tasks, briefly state what you're doing, then do it
-- Use tools to actually perform actions rather than describing what you would do
-- Be helpful and conversational, just not verbose
+Example task: "create a hello world script"
+WRONG: "Here's a script you can create..." (showing code)
+RIGHT: "I'll create that for you." then use write_file tool
 
 ## Tools
 You have these tools: ${allTools.map(t => t.name).join(', ')}
 
-When the user asks you to DO something (read a file, run a command, find something), use the appropriate tool. Output the tool call as JSON:
+When performing actions, output the tool call as JSON on its own line:
 {"name": "tool_name", "arguments": {"param": "value"}}
 `;
 
@@ -57,9 +53,16 @@ export class Repl {
     this.client = new OllamaClient();
     this.session = new SessionManager(process.cwd(), config.sessionsDir);
 
+    // Ensure stdin is in the right mode for readline
+    if (process.stdin.isTTY) {
+      process.stdin.setRawMode(false);
+    }
+
     this.rl = readline.createInterface({
       input: process.stdin,
       output: process.stdout,
+      terminal: process.stdin.isTTY ?? true,
+      historySize: 100,
     });
   }
 
@@ -93,6 +96,12 @@ export class Repl {
     return JSON.stringify(args).slice(0, 60) + '...';
   }
 
+  private formatSize(bytes: number): string {
+    if (bytes >= 1e9) return (bytes / 1e9).toFixed(1) + ' GB';
+    if (bytes >= 1e6) return (bytes / 1e6).toFixed(0) + ' MB';
+    return bytes + ' B';
+  }
+
   private async handleCommand(input: string): Promise<boolean> {
     const parts = input.trim().split(/\s+/);
     const command = parts[0]?.toLowerCase();
@@ -116,13 +125,22 @@ export class Repl {
           this.session.setModel(parts[1]);
           this.println(`${colors.green}✓ Switched to: ${parts[1]}${colors.reset}`);
         } else {
-          const models = await this.client.listModels();
+          const modelsInfo = await this.client.listModelsWithInfo();
           const currentModel = this.client.getModel();
-          const currentIndex = models.indexOf(currentModel);
 
-          const selected = await select('Select model:', models, currentIndex >= 0 ? currentIndex : 0);
+          // Format display strings with sizes
+          const displayOptions = modelsInfo.map(m =>
+            `${m.name} ${colors.dim}(${this.formatSize(m.size)})${colors.reset}`
+          );
+          const modelNames = modelsInfo.map(m => m.name);
+          const currentIndex = modelNames.indexOf(currentModel);
 
-          if (selected) {
+          const selectedDisplay = await select('Select model:', displayOptions, currentIndex >= 0 ? currentIndex : 0);
+
+          if (selectedDisplay) {
+            // Extract model name from display string
+            const selectedIndex = displayOptions.indexOf(selectedDisplay);
+            const selected = modelNames[selectedIndex]!;
             this.client.setModel(selected);
             this.session.setModel(selected);
             this.println(`${colors.green}✓ Switched to: ${selected}${colors.reset}`);
